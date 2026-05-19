@@ -9,7 +9,7 @@ set -e
 REGION="us-east-2"
 FUNCTION_NAME="harmony-pairing-api"
 ROLE_NAME="harmony-lambda-role"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" >/dev/null && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/../Harmony.Lambda"
 
 echo "======================================"
@@ -89,8 +89,8 @@ if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" >
         --function-name "$FUNCTION_NAME" \
         --runtime dotnet8 \
         --handler Harmony.Lambda \
-        --memory-size 1769 \
-        --timeout 30 \
+        --memory-size 3008 \
+        --timeout 40 \
         --region "$REGION" > /dev/null
 else
     echo "Creating new Lambda function..."
@@ -100,8 +100,8 @@ else
         --role "$ROLE_ARN" \
         --handler Harmony.Lambda \
         --zip-file "fileb://$PACKAGE_PATH" \
-        --memory-size 1769 \
-        --timeout 30 \
+        --memory-size 3008 \
+        --timeout 40 \
         --region "$REGION" > /dev/null
 
     echo "Waiting for function to be active..."

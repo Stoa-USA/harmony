@@ -89,7 +89,7 @@ public class PowermatchHighLow
 
         // Solve the model
         var solver = new CpSolver();
-        solver.StringParameters = "max_time_in_seconds:15";
+        solver.StringParameters = "max_time_in_seconds:19";
         var status = solver.Solve(model);
 
         if (status == CpSolverStatus.Optimal || status == CpSolverStatus.Feasible)

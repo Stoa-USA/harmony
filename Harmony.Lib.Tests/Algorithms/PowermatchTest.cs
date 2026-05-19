@@ -23,6 +23,26 @@ public class PowermatchTest
         Assert.Equal("62534", bye!.Aff.Name);
     }
 
+    // Regression for production pairing at 2026-05-19T00:35:45Z (Lincoln Douglas, 202 teams,
+    // round 3, no byes needed, all teams 1-1 on Aff/Neg). Win-bracket sizes are 53/96/53, so
+    // the structural minimum number of cross-bracket matchups is 2 (one 2W pulled down to 1W
+    // and one 0W pulled up to 1W). Production returned 10 cross-bracket matchups.
+    [Fact]
+    public void LincolnDouglas202R3_MinimizesCrossBracketPullups()
+    {
+        var (teams, roundNumber) = LoadScenario("LincolnDouglas202R3.json");
+
+        var round = new Round { Number = roundNumber };
+        round.PowermatchHighLow(teams);
+
+        var winsByName = teams.ToDictionary(t => t.Name, t => t.Wins);
+        var crossBracket = round.Matchups
+            .Where(m => !m.IsBye && winsByName[m.Aff.Name] != winsByName[m.Neg!.Name])
+            .ToList();
+
+        Assert.Equal(2, crossBracket.Count);
+    }
+
     private static (List<Team> teams, int roundNumber) LoadScenario(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "TestData", fileName);
