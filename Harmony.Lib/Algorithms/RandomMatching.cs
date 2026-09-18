@@ -84,7 +84,7 @@ public class RandomMatching
         model.Minimize(LinearExpr.Sum(costTerms));
 
         // Solve the model
-        var solver = new CpSolver();
+        var solver = SolverDefaults.CreateSolver();
         var status = solver.Solve(model);
 
         if (status == CpSolverStatus.Optimal || status == CpSolverStatus.Feasible)
