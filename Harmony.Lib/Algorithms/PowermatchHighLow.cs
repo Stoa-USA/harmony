@@ -1,5 +1,6 @@
 using Google.OrTools.Sat;
 using Harmony.Lib;
+using Harmony.Lib.Algorithms;
 using Harmony.Lib.Models;
 public class PowermatchHighLow
 {
@@ -88,8 +89,7 @@ public class PowermatchHighLow
         model.Minimize(LinearExpr.Sum(costTerms));
 
         // Solve the model
-        var solver = new CpSolver();
-        solver.StringParameters = "max_time_in_seconds:19";
+        var solver = SolverDefaults.CreateSolver();
         var status = solver.Solve(model);
 
         if (status == CpSolverStatus.Optimal || status == CpSolverStatus.Feasible)
