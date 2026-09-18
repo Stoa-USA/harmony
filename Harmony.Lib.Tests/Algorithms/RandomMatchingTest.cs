@@ -20,7 +20,10 @@ public class RandomMatchingTest
         var solver = SolverDefaults.CreateSolver();
 
         Assert.Equal($"max_time_in_seconds:{SolverDefaults.MaxTimeInSeconds}", solver.StringParameters);
-        Assert.True(SolverDefaults.MaxTimeInSeconds < 40, "Bound must stay under the Lambda function timeout.");
+        Assert.True(
+            SolverDefaults.MaxTimeInSeconds + SolverDefaults.RequiredHeadroomSeconds
+                <= SolverDefaults.LambdaTimeoutSeconds,
+            "Solver bound must leave headroom under the deployed Lambda --timeout.");
     }
 
     [Fact]

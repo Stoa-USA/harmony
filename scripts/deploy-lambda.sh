@@ -8,6 +8,7 @@ set -e
 
 REGION="us-east-2"
 FUNCTION_NAME="harmony-pairing-api"
+# --timeout below is mirrored by SolverDefaults.LambdaTimeoutSeconds; change both together.
 ROLE_NAME="harmony-lambda-role"
 SCRIPT_DIR="$(cd "$(dirname "$0")" >/dev/null && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/../Harmony.Lambda"
@@ -90,7 +91,7 @@ if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" >
         --runtime dotnet8 \
         --handler Harmony.Lambda \
         --memory-size 3008 \
-        --timeout 40 \
+        --timeout 300 \
         --region "$REGION" > /dev/null
 else
     echo "Creating new Lambda function..."
@@ -101,7 +102,7 @@ else
         --handler Harmony.Lambda \
         --zip-file "fileb://$PACKAGE_PATH" \
         --memory-size 3008 \
-        --timeout 40 \
+        --timeout 300 \
         --region "$REGION" > /dev/null
 
     echo "Waiting for function to be active..."
