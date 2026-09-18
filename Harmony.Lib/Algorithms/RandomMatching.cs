@@ -1,9 +1,12 @@
-using Google.OrTools.Sat;
 using Harmony.Lib;
 using Harmony.Lib.Models;
 
 namespace Harmony.Lib.Algorithms;
 
+// Produces a legal pairing chosen at random: every legal pair (and, in an odd round,
+// every bye-eligible team's bye) gets a random cost and the exact min-cost matching
+// is taken. Any legal pairing is what the caller wants; the random costs just make
+// the choice unstructured, and the exact solver makes it instant.
 public class RandomMatching
 {
     private readonly Random _random;
@@ -17,82 +20,49 @@ public class RandomMatching
     {
         public required Team Aff { get; init; }
         public Team? Neg { get; init; }
-        public required BoolVar IsSelected { get; set; }
-        public int Cost { get; set; }
 
         public override string ToString() => $"Team {Aff.Name} vs Team {Neg?.Name ?? "Bye"}";
     }
 
     public List<Edge> SolveMatching(List<Team> teams)
     {
-        var teamCount = teams.Count;
-        var byeRoundExists = teamCount % 2 != 0;
+        var byeRoundExists = teams.Count % 2 != 0;
 
-        var model = new CpModel();
+        // In an odd round the bye is an extra vertex that only bye-eligible teams can
+        // be matched to, so the bye is chosen as part of the matching, not up front.
+        var byeVertex = byeRoundExists ? teams.Count : -1;
+        var vertexCount = byeRoundExists ? teams.Count + 1 : teams.Count;
+
+        var candidates = new List<(int U, int V, long Cost)>();
+        for (var i = 0; i < teams.Count; i++)
+        {
+            if (byeRoundExists && !teams[i].HadBye)
+                candidates.Add((i, byeVertex, _random.Next(1000)));
+
+            for (var j = i + 1; j < teams.Count; j++)
+            {
+                if (!PairRules.IsLegal(teams[i], teams[j])) continue;
+                candidates.Add((i, j, _random.Next(1000)));
+            }
+        }
+
+        var partner = MinCostPerfectMatching.Solve(vertexCount, candidates)
+            ?? throw new CannotPairException();
 
         var edges = new List<Edge>();
-        teams.ForEach(affTeam =>
+        for (var i = 0; i < teams.Count; i++)
         {
-            if (byeRoundExists && !affTeam.HadBye)
+            var j = partner[i];
+            if (j == byeVertex)
             {
-                var byeEdge = new Edge
-                {
-                    Aff = affTeam,
-                    Neg = null,
-                    IsSelected = model.NewBoolVar($"bye_{affTeam.Name}"),
-                    Cost = _random.Next(1000) // Random cost for bye
-                };
-                edges.Add(byeEdge);
+                edges.Add(new Edge { Aff = teams[i], Neg = null });
+                continue;
             }
-            if (affTeam.CanGoAff)
-            {
-                teams.ForEach(negTeam =>
-                {
-                    if (affTeam != negTeam && negTeam.CanGoNeg && !affTeam.HasHit(negTeam))
-                    {
-                        var edge = new Edge
-                        {
-                            Aff = affTeam,
-                            Neg = negTeam,
-                            IsSelected = model.NewBoolVar($"match_{affTeam.Name}_{negTeam.Name}"),
-                            Cost = _random.Next(1000) // Random cost for all legal matchups
-                        };
-                        edges.Add(edge);
-                    }
-                });
-            }
-        });
-
-        // Each team must be in exactly one edge
-        teams.ForEach(team =>
-        {
-            var teamEdges = edges.Where(e => e.Aff == team || e.Neg == team).Select(e => e.IsSelected).ToList();
-            model.Add(LinearExpr.Sum(teamEdges) == 1);
-        });
-
-        // Total edges should equal expected matchup count
-        var allEdges = edges.Select(e => e.IsSelected).ToList();
-        var expectedMatchupCount = teamCount / 2;
-        if (byeRoundExists)
-        {
-            expectedMatchupCount++;
-        }
-        model.Add(LinearExpr.Sum(allEdges) == expectedMatchupCount);
-
-        // Minimize cost (which is random, so we get random valid matching)
-        var costTerms = edges.Select(e => e.IsSelected * e.Cost).ToList();
-        model.Minimize(LinearExpr.Sum(costTerms));
-
-        // Solve the model
-        var solver = SolverDefaults.CreateSolver();
-        var status = solver.Solve(model);
-
-        if (status == CpSolverStatus.Optimal || status == CpSolverStatus.Feasible)
-        {
-            var answer = edges.Where(e => solver.BooleanValue(e.IsSelected)).ToList();
-            return answer;
+            if (j < i) continue;
+            var (aff, neg) = PairRules.AssignSides(teams[i], teams[j], preferAff: (_, _) => _random.Next(2) == 0);
+            edges.Add(new Edge { Aff = aff, Neg = neg });
         }
 
-        throw new CannotPairException();
+        return edges;
     }
 }

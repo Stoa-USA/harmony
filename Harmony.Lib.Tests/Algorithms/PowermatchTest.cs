@@ -43,7 +43,7 @@ public class PowermatchTest
         Assert.Equal(2, crossBracket.Count);
     }
 
-    private static (List<Team> teams, int roundNumber) LoadScenario(string fileName)
+    internal static (List<Team> teams, int roundNumber) LoadScenario(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "TestData", fileName);
         using var stream = File.OpenRead(path);
@@ -326,7 +326,35 @@ public class PowermatchTest
         Assert.Throws<CannotPairException>(() => new Round { Number = 1 }.PowermatchHighLow([teamA, teamB, teamC]));
     }
 
-    [Fact(Skip = "Long-running benchmark; enable to profile pairing performance.")]
+    // Scenario 07 (scripts/test-scenarios) lists "Team 7" in Team 12's history but not the
+    // reverse. A one-sided history is still a rematch: whichever team's record the pair is
+    // checked from, the cheapest pair here must be skipped.
+    [Fact]
+    public void OneSidedOpponentHistoryStillCountsAsARematch()
+    {
+        var a = new Team { Name = "A", Seed = 1 };
+        var b = new Team { Name = "B", Seed = 40 };
+        var c = new Team { Name = "C", Seed = 2 };
+        var d = new Team { Name = "D", Seed = 3 };
+        foreach (var order in new[] { new[] { a, b, c, d }, new[] { b, a, d, c } })
+        {
+            var teams = order.Select(t => new Team { Name = t.Name, Seed = t.Seed }).ToList();
+            var first = teams.Single(t => t.Name == "A");
+            var second = teams.Single(t => t.Name == "B");
+            // Only A records the meeting; B's history is empty. A-B has by far the best seed spread.
+            first.RecordOpponent(second);
+
+            var round = new Round { Number = 1 };
+            round.PowermatchHighLow(teams);
+
+            Assert.DoesNotContain(round.Matchups, m => new[] { m.Aff.Name, m.Neg!.Name }.Order().SequenceEqual(["A", "B"]));
+            Assert.Equal(2, round.Matchups.Count);
+        }
+    }
+
+    // Six full rounds of a 110-team field. With the exact matching algorithm each round is
+    // well under a second, so this runs as a regular regression test.
+    [Fact]
     public void LargeScaleTournament_110Teams_6Rounds()
     {
         var teams = new List<Team>();
@@ -398,8 +426,8 @@ public class PowermatchTest
         // Performance check - each round should complete in reasonable time
         for (int i = 0; i < roundTimes.Count; i++)
         {
-            Assert.True(roundTimes[i] < 30000,
-                $"Round {i + 1} took {roundTimes[i]}ms, expected < 30s");
+            Assert.True(roundTimes[i] < 5000,
+                $"Round {i + 1} took {roundTimes[i]}ms, expected < 5s");
         }
 
         Console.WriteLine($"110 teams, 6 rounds completed:");
