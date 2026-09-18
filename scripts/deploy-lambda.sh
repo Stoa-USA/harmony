@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Deploy Harmony.Lambda to AWS Lambda using .NET 8
+# Deploy Harmony.Lambda to AWS Lambda using .NET 10
 # This script creates all necessary AWS resources and deploys the Lambda function
 # Requirements: AWS CLI configured with appropriate credentials
 
@@ -16,7 +16,7 @@ echo "======================================"
 echo "Deploying Harmony Lambda Function"
 echo "Region: $REGION"
 echo "Function: $FUNCTION_NAME"
-echo "Runtime: dotnet8"
+echo "Runtime: dotnet10"
 echo "======================================"
 echo ""
 
@@ -87,7 +87,7 @@ if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" >
     echo "Updating function configuration..."
     aws lambda update-function-configuration \
         --function-name "$FUNCTION_NAME" \
-        --runtime dotnet8 \
+        --runtime dotnet10 \
         --handler Harmony.Lambda \
         --memory-size 3008 \
         --timeout 40 \
@@ -96,7 +96,7 @@ else
     echo "Creating new Lambda function..."
     aws lambda create-function \
         --function-name "$FUNCTION_NAME" \
-        --runtime dotnet8 \
+        --runtime dotnet10 \
         --role "$ROLE_ARN" \
         --handler Harmony.Lambda \
         --zip-file "fileb://$PACKAGE_PATH" \
