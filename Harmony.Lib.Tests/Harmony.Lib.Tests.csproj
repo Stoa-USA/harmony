@@ -12,6 +12,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <!-- Test-only: CP-SAT is the exact oracle the blossom solver is checked against. -->
+    <PackageReference Include="Google.OrTools" Version="9.15.6755" />
   </ItemGroup>
 
   <ItemGroup>

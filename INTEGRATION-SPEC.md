@@ -240,7 +240,7 @@ Common error scenarios:
 
 ## 6. Algorithm Behavior
 
-The API supports two matching strategies, selected via the `strategy` field in the request. Both use the Google OR-Tools CP-SAT constraint solver and enforce the same hard constraints.
+The API supports two matching strategies, selected via the `strategy` field in the request. Both are solved as an exact minimum-cost perfect matching (see SOLVER-APPROACH.md) and enforce the same hard constraints.
 
 ### Strategy: `"powermatch"` (default)
 

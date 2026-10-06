@@ -14,23 +14,24 @@ Given N teams with varying win-loss records, seeds, side histories, and prior op
 - Each team's **aff/neg balance** stays within 1
 - At most one team receives a **bye**, and only if they haven't had one already
 
-This is a constrained optimization problem. The solution space is enormous — for 86 teams there are trillions of possible pairings — so brute force is out. Harmony uses a constraint-programming solver to find the best answer.
+This is a constrained optimization problem. The solution space is enormous — for 86 teams there are trillions of possible pairings — so brute force is out. It is, however, exactly a **minimum-cost perfect matching** problem, which has a polynomial exact algorithm (Edmonds' blossom algorithm). Harmony uses that to find the provably best answer in milliseconds.
 
 ---
 
-## The Approach: Graph + Constraint Solver
+## The Approach: Graph + Exact Matching
 
-The algorithm models the problem as a **minimum-cost edge selection** problem on a bipartite-like graph, solved using Google OR-Tools' CP-SAT (Constraint Programming with Boolean Satisfiability) solver.
+The algorithm models the problem as a **minimum-cost perfect matching** on a general graph: teams are vertices, every legal matchup is an edge with a cost, and a pairing is a set of edges that touches every team exactly once. It is solved exactly by the O(n³) weighted blossom algorithm in `MinCostPerfectMatching`.
+
+The graph is *not* bipartite. `CanGoAff`/`CanGoNeg` are a legality filter, not a partition: a team with equal aff and neg rounds may take either side, which is every team in an odd-numbered round. That matters because min-cost matching on a bipartite graph is an easy linear program, while on a general graph the linear relaxation is not integral (odd cycles can be "half matched") and a generic MIP/CP solver has to branch its way through every odd set. Blossom handles the odd sets directly.
 
 ### Step 1: Build the candidate graph
 
 The solver constructs a list of **edges**, where each edge represents a potential matchup. There are two types:
 
-**Match edges** — one for every legal (aff, neg) team pair:
-- The aff team must be eligible to go aff (`affRounds <= negRounds`)
-- The neg team must be eligible to go neg (`negRounds <= affRounds`)
+**Match edges** — one for every unordered pair of teams that can legally meet:
+- At least one side assignment must be legal: (A aff, B neg) needs `A.affRounds <= A.negRounds` and `B.negRounds <= B.affRounds`, or the reverse
 - The two teams must not have faced each other before
-- Note: if both teams can go either side, two directed edges are created (A→B and B→A)
+- Matchup cost is symmetric, so one undirected edge per pair is enough; which side each team takes is decided after the matching (`PairRules.AssignSides`): the only legal direction if there is one, otherwise the better-seeded team goes aff
 
 **Bye edges** — one for each team eligible for a bye:
 - Only created when the field has an odd number of teams
@@ -84,38 +85,21 @@ byeCost = wins << 20    (i.e., wins × 1,048,576)
 
 This means a 0-win team's bye costs 0, a 1-win team's bye costs ~1M, and a 2-win team's bye costs ~2M. The effect: lower-ranked teams get byes first. A bye for a 2-win team costs more than a 1-win-gap pullup (100K), so the solver will prefer to give the bye to a weaker team even if it forces a mild pullup elsewhere.
 
-### Step 3: Add constraints
+### Step 3: Constrain
 
-Two hard constraints are added to the CP-SAT model:
-
-**1. Exactly-one constraint (per team):**
-Every team must appear in exactly one selected edge — no team is left out, and no team appears twice.
-
-```
-For each team T:
-    sum(edge.IsSelected for all edges containing T) == 1
-```
-
-**2. Total matchup count:**
-The number of selected edges must equal exactly `⌊N/2⌋` (even field) or `⌊N/2⌋ + 1` (odd field, since one edge is a bye).
-
-```
-sum(all edge.IsSelected) == expectedMatchupCount
-```
-
-Note that rematch avoidance and side-balance are enforced **structurally** — illegal edges are simply never created in Step 1. There is no constraint for "don't rematch"; instead, the edge (A vs B) is never added if A has hit B. Similarly, if a team's aff count exceeds their neg count, no edge is created with them on aff.
+The only constraint is the definition of a perfect matching: every team is in exactly one selected edge. Rematch avoidance, side balance and bye eligibility are enforced **structurally** — illegal edges are simply never created in Step 1. There is no constraint for "don't rematch"; instead, the edge (A vs B) is never added if A has hit B.
 
 ### Step 4: Solve
 
-The CP-SAT solver searches for the assignment of all boolean variables that satisfies the constraints while minimizing total cost:
+`MinCostPerfectMatching` finds the perfect matching of minimum total cost:
 
 ```
-minimize: sum(edge.Cost × edge.IsSelected) for all edges
+minimize: sum(edge.Cost) over selected edges
 ```
 
-The solver runs with a **15-second timeout**. It accepts either an optimal solution or the best feasible solution found within the time limit. For typical tournament sizes (up to ~110 teams), it finds the optimal solution in under a second.
+The algorithm is exact and polynomial (O(n³) in the number of teams), so there is no time limit and no "best feasible so far": a 200-team round returns the optimal pairing in milliseconds. If no perfect matching exists — for example, every legal opponent for some team has been exhausted — `SolveMatching` throws a `CannotPairException`.
 
-If no feasible assignment exists — for example, every legal opponent for some team has been exhausted — the solver throws a `CannotPairException`.
+The Lambda `--timeout` in `scripts/deploy-lambda.sh` only bounds the function itself; pairing never gets near it.
 
 ### Step 5: Extract results
 
@@ -172,17 +156,11 @@ Why D vs F instead of D vs something else? There are only two 0-2 teams (F and G
 
 ---
 
-## Why CP-SAT?
+## Why an exact matching algorithm?
 
-The solver uses Google OR-Tools CP-SAT rather than simpler approaches (greedy, Hungarian algorithm) because:
+Earlier versions solved the same model with Google OR-Tools' CP-SAT solver. That worked for small fields but scaled badly for a reason that has nothing to do with the cost function: CP-SAT relaxes the problem to a linear program, and the LP for matching on a *general* graph is only half-integral. Every odd cycle among teams that could all meet each other is a place where the LP bound lies, and CP-SAT has to branch through them one by one to prove optimality. A 31-team round 6 took 3–15 seconds; a 202-team round 3 took ~150 seconds, and when the time limit hit first the API returned a non-optimal pairing without saying so. Random costs, tighter encodings and hand-written cuts did not change that; it is the wrong tool for this shape of problem.
 
-1. **Multiple constraint types** — win balance, side balance, no rematches, bye eligibility, and count constraints all interact. Greedy algorithms can't globally optimize across all of these.
-
-2. **Non-linear costs** — the tiered win costs and squared seed spread don't fit neatly into linear assignment frameworks.
-
-3. **Guaranteed optimality** — CP-SAT proves the solution is optimal (or returns the best feasible solution under time pressure). A greedy approach might paint itself into a corner.
-
-4. **Performance** — CP-SAT handles the scale well. 110 teams × 6 rounds solves in under 15 seconds per round. The boolean variable count grows quadratically with team count (one per candidate edge), but the solver's propagation and pruning keep it tractable.
+Blossom is the right tool: it is the exact algorithm for weighted matching on general graphs, its running time depends only on the number of teams, and it either returns the optimum or proves that no legal pairing exists. The cost function is unchanged — all the intelligence is still there — and CP-SAT is kept as a test-only dependency, where it acts as an independent oracle that the blossom implementation is checked against on hundreds of random instances.
 
 ---
 
@@ -195,9 +173,9 @@ Build candidate edges (filter out illegal matchups structurally)
     ↓
 Assign costs (win balance >> seed spread >> club avoidance)
     ↓
-Constrain (exactly one edge per team, correct total count)
+Constrain (exactly one edge per team)
     ↓
-Minimize total cost via CP-SAT solver
+Minimum-cost perfect matching (blossom algorithm, exact)
     ↓
 Selected edges → matchups + byes
 ```

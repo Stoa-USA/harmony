@@ -7,10 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Google.OrTools" Version="9.15.6755" />
-  </ItemGroup>
-
-  <ItemGroup>
     <InternalsVisibleTo Include="Harmony.Lib.Tests" />
   </ItemGroup>
 

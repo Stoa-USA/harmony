@@ -1,26 +1,21 @@
-using Google.OrTools.Sat;
 using Harmony.Lib;
 using Harmony.Lib.Algorithms;
 using Harmony.Lib.Models;
+
 public class PowermatchHighLow
 {
     public class Edge
     {
         public required Team Aff { get; init; }
         public Team? Neg { get; init; }
-        public required BoolVar IsSelected { get; set; }
-        public int Cost { get; set; }
+        public int Cost { get; init; }
 
         public override string ToString() => $"Team {Aff.Name} vs Team {Neg?.Name ?? "Bye"}";
     }
 
     public List<Edge> SolveMatching(List<Team> teams)
     {
-        var teamCount = teams.Count;
-        var byeRoundExists = teamCount % 2 != 0;
-
-        var model = new CpModel();
-
+        var byeRoundExists = teams.Count % 2 != 0;
         var edges = new List<Edge>();
 
         // The bye is a hard pre-assignment: worst bye-eligible team (fewest wins,
@@ -37,68 +32,36 @@ public class PowermatchHighLow
                 .FirstOrDefault();
             if (byeTeam == null) throw new CannotPairException();
 
-            edges.Add(new Edge
-            {
-                Aff = byeTeam,
-                Neg = null,
-                IsSelected = model.NewBoolVar($"bye_{byeTeam.Name}"),
-                Cost = 0
-            });
+            edges.Add(new Edge { Aff = byeTeam, Neg = null, Cost = 0 });
         }
 
-        teams.ForEach(affTeam =>
+        var pool = teams.Where(t => t != byeTeam).ToList();
+
+        // Matchup cost is symmetric, so each legal pair is one undirected edge; which
+        // side each team takes is decided after the matching (see PairRules.AssignSides).
+        var candidates = new List<(int U, int V, long Cost)>();
+        for (var i = 0; i < pool.Count; i++)
         {
-            if (affTeam == byeTeam) return;
-            if (affTeam.CanGoAff)
+            for (var j = i + 1; j < pool.Count; j++)
             {
-                teams.ForEach(negTeam =>
-                {
-                    if (negTeam == byeTeam) return;
-                    if (affTeam != negTeam && negTeam.CanGoNeg && !affTeam.HasHit(negTeam))
-                    {
-                        var edge = new Edge
-                        {
-                            Aff = affTeam,
-                            Neg = negTeam,
-                            IsSelected = model.NewBoolVar($"match_{affTeam.Name}_{negTeam.Name}"),
-                            Cost = affTeam.MatchupCost(negTeam)
-                        };
-                        edges.Add(edge);
-                    }
-                });
+                var a = pool[i];
+                var b = pool[j];
+                if (!PairRules.IsLegal(a, b)) continue;
+                candidates.Add((i, j, a.MatchupCost(b)));
             }
-        });
-        
-        // Removed verbose edge logging for performance
-
-        teams.ForEach(team =>
-        {
-            var teamEdges = edges.Where(e => e.Aff == team || e.Neg == team).Select(e => e.IsSelected).ToList();
-            model.Add(LinearExpr.Sum(teamEdges) == 1);
-        });
-
-        var allEdges = edges.Select(e => e.IsSelected).ToList();
-        var expectedMatchupCount = teamCount / 2;
-        if (byeRoundExists)
-        {
-            expectedMatchupCount++;
-        }
-        model.Add(LinearExpr.Sum(allEdges) == expectedMatchupCount);
-
-        var costTerms = edges.Select(e => e.IsSelected * e.Cost).ToList();
-        model.Minimize(LinearExpr.Sum(costTerms));
-
-        // Solve the model
-        var solver = SolverDefaults.CreateSolver();
-        var status = solver.Solve(model);
-
-        if (status == CpSolverStatus.Optimal || status == CpSolverStatus.Feasible)
-        {
-            // Return only the selected edges
-            var answer = edges.Where(e => solver.BooleanValue(e.IsSelected)).ToList();
-            return answer;
         }
 
-        throw new CannotPairException();
+        var partner = MinCostPerfectMatching.Solve(pool.Count, candidates)
+            ?? throw new CannotPairException();
+
+        for (var i = 0; i < pool.Count; i++)
+        {
+            var j = partner[i];
+            if (j < i) continue;
+            var (aff, neg) = PairRules.AssignSides(pool[i], pool[j], preferAff: PairRules.LowerSeedNumber);
+            edges.Add(new Edge { Aff = aff, Neg = neg, Cost = aff.MatchupCost(neg) });
+        }
+
+        return edges;
     }
 }
